@@ -1,5 +1,5 @@
 // Arquivo: src/components/MockupGenerator.tsx
-// Descrição: Versão final com funcionalidade de espelhamento (Flip) no painel principal.
+// Descrição: Versão com lógica de download híbrida para mockups 2D e 3D.
 
 import React, { useState, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,7 +33,7 @@ import { BabyBody2DViewer } from "@/components/2d/BabyBody2DViewer";
 import { Squeeze2DViewer } from "./2d/Squeeze2DViewer";
 import { ChoppMug2DViewer } from "@/components/2d/ChoppMug2DViewer";
 
-// Importação de ícones, incluindo os de Flip
+// Importação de ícones
 import {
   Download, Palette, Wand2, RotateCw, Move3d, ArrowLeftRight, ArrowUpDown, Upload,
   Shirt, Coffee, HardHat, Sparkles, Ruler, CupSoda, ChefHat, Square, BedDouble, Baby, GlassWater, Beer, ImageDown,
@@ -75,17 +75,20 @@ const productConfigurations: Record<string, Omit<ProductSettings, 'textScaleY' |
   chopp_mug: { imageScaleX: 0.45, imageScaleY: 0.45, imageOffsetX: 0, imageOffsetY: -30, imageRotation: 0, textureOffsetX: 0, },
 };
 
+// Interface para o tipo da ref que será exposta pelos componentes 3D
+interface CanvasHandle {
+  getCanvas: () => HTMLCanvasElement;
+}
+
 const MockupGenerator = () => {
   const { toast } = useToast();
   const directFileInputRef = useRef<HTMLInputElement>(null);
+  const canvas3DRef = useRef<CanvasHandle>(null); // <-- 1. REF PARA O CANVAS 3D
+
   const [selectedProduct, setSelectedProduct] = useState(availableProducts[0].id);
-  
   const [finalArtUrl, setFinalArtUrl] = useState<string | null>(null);
   const [isArtEditorOpen, setIsArtEditorOpen] = useState(false);
-  
-  // --- NOVO ESTADO PARA O FLIP DA ARTE PRINCIPAL ---
   const [artFlip, setArtFlip] = useState({ horizontal: false, vertical: false });
-  
   const [productColor, setProductColor] = useState("#ffffff");
   const [settings, setSettings] = useState(productConfigurations[selectedProduct]);
   const [globalSizeMultiplier, setGlobalSizeMultiplier] = useState(1.0);
@@ -99,24 +102,63 @@ const MockupGenerator = () => {
     setSettings(prev => ({ ...prev, [key]: value }));
   };
 
-  const handleDownloadMockup = async () => { /* ...lógica de download do mockup inalterada... */ };
+  // --- 2. LÓGICA DE DOWNLOAD HÍBRIDA IMPLEMENTADA ---
+  const handleDownloadMockup = async () => {
+    // Lógica para produtos 3D
+    if (products3D.includes(selectedProduct)) {
+      const canvas = canvas3DRef.current?.getCanvas();
+      if (canvas) {
+        try {
+          const link = document.createElement("a");
+          link.download = `mockup-3d-${selectedProduct}.png`;
+          // Preserva o conteúdo do canvas antes de convertê-lo para Data URL
+          link.href = canvas.toDataURL("image/png");
+          link.click();
+          toast({ title: "Mockup 3D exportado!", description: "O download foi iniciado." });
+        } catch (error) {
+           console.error("Falha ao exportar canvas 3D:", error);
+           toast({ title: "Erro de Exportação", description: "Não foi possível gerar a imagem. O seu navegador pode não ser compatível.", variant: "destructive"});
+        }
+      } else {
+        toast({ title: "Erro de Referência", description: "Não foi possível acessar o canvas 3D para captura.", variant: "destructive" });
+      }
+      return;
+    }
+
+    // Lógica para produtos 2D (mantém html2canvas)
+    const mockupArea = document.getElementById("viewer-2d-container");
+    if (!mockupArea) {
+      toast({ title: "Erro de Seletor", description: "Não foi possível encontrar a área do mockup 2D para captura.", variant: "destructive" });
+      return;
+    }
+    try {
+      const canvas = await html2canvas(mockupArea, { 
+          backgroundColor: null,
+          logging: false,
+          useCORS: true
+      });
+      const link = document.createElement("a");
+      link.download = `mockup-2d-${selectedProduct}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+      toast({ title: "Mockup 2D exportado!", description: "O download foi iniciado." });
+    } catch (error) {
+      console.error("Falha ao gerar o mockup 2D com html2canvas:", error);
+      toast({ title: "Erro Inesperado", description: "Ocorreu um problema ao gerar a imagem do mockup 2D.", variant: "destructive" });
+    }
+  };
+
   const handleDownloadArt = () => {
-  if (!finalArtUrl) {
-    toast({
-      title: "Nenhuma arte encontrada",
-      description: "Crie ou carregue uma arte antes de exportar.",
-      variant: "destructive",
-    });
-    return;
-  }
-
-  const link = document.createElement("a");
-  link.href = finalArtUrl;
-  link.download = "sua-arte.png";
-  link.click();
-
-  toast({ title: "Arte exportada!", description: "Sua arte foi baixada com sucesso." });
-};
+    if (!finalArtUrl) {
+      toast({ title: "Nenhuma arte encontrada", description: "Crie ou carregue uma arte antes de exportar.", variant: "destructive" });
+      return;
+    }
+    const link = document.createElement("a");
+    link.href = finalArtUrl;
+    link.download = "sua-arte.png";
+    link.click();
+    toast({ title: "Arte exportada!", description: "Sua arte foi baixada com sucesso." });
+  };
   
   const handleDirectArtUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -128,7 +170,7 @@ const MockupGenerator = () => {
       const reader = new FileReader();
       reader.onloadend = () => {
         setFinalArtUrl(reader.result as string);
-        setArtFlip({ horizontal: false, vertical: false }); // Reseta o flip
+        setArtFlip({ horizontal: false, vertical: false });
         toast({ title: "Arte Carregada!", description: "Sua arte pronta foi aplicada ao produto." });
       };
       reader.readAsDataURL(file);
@@ -137,7 +179,7 @@ const MockupGenerator = () => {
 
   const handleSaveArtFromEditor = (artDataUrl: string) => {
     setFinalArtUrl(artDataUrl);
-    setArtFlip({ horizontal: false, vertical: false }); // Reseta o flip
+    setArtFlip({ horizontal: false, vertical: false });
     toast({ title: "Arte Aplicada!", description: "Sua arte criada no editor foi aplicada ao produto." });
   };
 
@@ -146,7 +188,6 @@ const MockupGenerator = () => {
     uploadedImage: finalArtUrl,
     customText: "", textColor: "", textFont: "", textSize: 0, 
     textureOffsetX: settings.textureOffsetX,
-    // --- LÓGICA DE FLIP APLICADA AQUI ---
     imageScaleX: settings.imageScaleX * globalSizeMultiplier * (artFlip.horizontal ? -1 : 1),
     imageScaleY: settings.imageScaleY * globalSizeMultiplier * (artFlip.vertical ? -1 : 1),
     imageOffsetX: settings.imageOffsetX, imageOffsetY: settings.imageOffsetY, imageRotation: settings.imageRotation,
@@ -179,6 +220,7 @@ const MockupGenerator = () => {
           <div className="max-w-7xl mx-auto">
             <div className="grid lg:grid-cols-3 gap-8">
               <div className="lg:col-span-1 space-y-6">
+                 {/* Painel de Controles (inalterado) */}
                 <Card>
                   <CardHeader><CardTitle>1. Escolha o Produto</CardTitle></CardHeader>
                   <CardContent>
@@ -194,7 +236,6 @@ const MockupGenerator = () => {
                     </Select>
                   </CardContent>
                 </Card>
-
                 <Card>
                   <CardHeader><CardTitle>2. Escolha sua Arte</CardTitle></CardHeader>
                   <CardContent className="space-y-3">
@@ -206,7 +247,6 @@ const MockupGenerator = () => {
                     </Button>
                   </CardContent>
                 </Card>
-
                 {finalArtUrl && (
                   <Card>
                     <CardHeader><CardTitle>3. Ajustes da Arte no Produto</CardTitle></CardHeader>
@@ -244,8 +284,6 @@ const MockupGenerator = () => {
                         <Label className="flex justify-between items-center"><span className="flex items-center"><RotateCw className="w-4 h-4 mr-2" /> Rotação 2D</span><span>{settings.imageRotation}°</span></Label>
                         <Slider value={[settings.imageRotation]} onValueChange={(v) => handleSettingChange('imageRotation', v[0])} min={0} max={360} step={1} />
                       </div>
-                      
-                      {/* --- NOVOS CONTROLES DE FLIP --- */}
                       <div className="space-y-2 pt-4 border-t border-muted">
                         <Label>Espelhar</Label>
                         <div className="grid grid-cols-2 gap-2">
@@ -257,11 +295,9 @@ const MockupGenerator = () => {
                           </Button>
                         </div>
                       </div>
-
                     </CardContent>
                   </Card>
                 )}
-
                 <Card>
                   <CardHeader><CardTitle>Ajustes Gerais do Produto</CardTitle></CardHeader>
                   <CardContent className="space-y-6">
@@ -278,7 +314,6 @@ const MockupGenerator = () => {
                 <Button size="lg" className="w-full btn-primary" onClick={handleDownloadMockup}>
                   <Download className="w-4 h-4 mr-2" /> Baixar Mockup PNG
                 </Button>
-
                 {finalArtUrl && (
                   <Button size="lg" variant="secondary" className="w-full mt-2" onClick={handleDownloadArt}>
                     <ImageDown className="w-4 h-4 mr-2" /> Baixar Arte PNG
@@ -290,11 +325,12 @@ const MockupGenerator = () => {
                   <CardContent className="p-2 md:p-4 h-[60vh] lg:h-[70vh] relative bg-muted/30 rounded-lg">
                     {products3D.includes(selectedProduct) ? (
                       <>
-                        {selectedProduct === 'mug' && <Mug3DViewer {...commonViewerProps} />}
-                        {selectedProduct === 'xicara' && <XicaraViewer {...commonViewerProps} />}
-                        {selectedProduct === 'tshirt' && <TshirtViewer {...commonViewerProps} />}
-                        {selectedProduct === 'long_sleeve' && <LongSleeveViewer {...commonViewerProps} />}
-                        {selectedProduct === 'cap' && <CapViewer {...commonViewerProps} />}
+                        {/* --- 3. REF PASSADA PARA OS COMPONENTES 3D --- */}
+                        {selectedProduct === 'mug' && <Mug3DViewer ref={canvas3DRef} {...commonViewerProps} />}
+                        {selectedProduct === 'xicara' && <XicaraViewer ref={canvas3DRef} {...commonViewerProps} />}
+                        {selectedProduct === 'tshirt' && <TshirtViewer ref={canvas3DRef} {...commonViewerProps} />}
+                        {selectedProduct === 'long_sleeve' && <LongSleeveViewer ref={canvas3DRef} {...commonViewerProps} />}
+                        {selectedProduct === 'cap' && <CapViewer ref={canvas3DRef} {...commonViewerProps} />}
                       </>
                     ) : (
                       <div id="viewer-2d-container">

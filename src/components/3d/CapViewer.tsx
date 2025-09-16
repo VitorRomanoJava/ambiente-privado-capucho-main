@@ -1,14 +1,11 @@
-// Arquivo: src/components/3d/Mug3DViewer.tsx
-// Status: Nenhuma alteração necessária. Já está em conformidade com a Etapa 1.
-
-import { Canvas } from '@react-three/fiber';
+import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
-import { Suspense } from 'react';
+import { Suspense, forwardRef, useImperativeHandle } from 'react';
 import { CapModel } from './CapModel';
 import { useTextureManager } from '@/hooks/useTextureManager';
-import { CapViewerProps } from './types'; 
+import { CapViewerProps } from './types';
 
-export const CapViewer = (props: CapViewerProps) => {
+export const CapViewer = forwardRef((props: CapViewerProps, ref) => {
   const { texture } = useTextureManager({
     imageSrc: props.uploadedImage,
     text: props.customText,
@@ -28,23 +25,34 @@ export const CapViewer = (props: CapViewerProps) => {
     textRotation: props.textRotation,
   });
 
-  return (
-    <Canvas id="product-canvas" camera={{ position: [0, 0, 4], fov: 35 }} shadows>
-      <Suspense fallback={null}>
+  const CanvasContent = () => {
+    const { gl } = useThree();
+    useImperativeHandle(ref, () => ({
+      getCanvas: () => gl.domElement,
+    }));
+
+    return (
+      <>
         <Environment preset="studio" intensity={0.8} />
         <ambientLight intensity={0.1} />
         <directionalLight position={[0, 0, 7]} intensity={1} castShadow />
-        
         <CapModel texture={texture} />
-        
-        <OrbitControls 
-          minDistance={0.5} 
-          maxDistance={5} 
+        <OrbitControls
+          minDistance={0.5}
+          maxDistance={5}
           enablePan={false}
           minPolarAngle={Math.PI / 4}
           maxPolarAngle={Math.PI / 1.5}
         />
+      </>
+    );
+  };
+
+  return (
+    <Canvas id="product-canvas" camera={{ position: [0, 0, 4], fov: 35 }} shadows gl={{ preserveDrawingBuffer: true }}>
+      <Suspense fallback={null}>
+        <CanvasContent />
       </Suspense>
     </Canvas>
   );
-};
+});
